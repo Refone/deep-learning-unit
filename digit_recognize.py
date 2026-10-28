@@ -8,13 +8,14 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from nn_net import NN
+from nn_net import NN, load_nn_net, save_nn_net
 from optimizer import AdamW
 
 ROOT = Path(__file__).resolve().parent
 VAR = ROOT / "var"
 DATA_DIR = VAR / "mnist"
 CACHE = VAR / "mnist.npz"
+MODEL = VAR / "mnist_model.npz"
 SAMPLE = VAR / "sample_image.png"
 
 # 数据集页面：https://platform.ultralytics.com/ultralytics/datasets/mnist
@@ -53,13 +54,17 @@ def data_prepare():
         # 缓存为 npz，避免每次重新解码 7 万张 PNG
         np.savez_compressed(
             CACHE,
-            x_train=train_data[0], y_train=train_data[1],
-            x_test=test_data[0], y_test=test_data[1],
+            x_train=train_data[0],
+            y_train=train_data[1],
+            x_test=test_data[0],
+            y_test=test_data[1],
         )
 
     if not SAMPLE.exists():
         index = int(np.flatnonzero(test_data[1] == 7)[0])
-        pixels = (test_data[0][index].reshape(IMAGE_SIZE, IMAGE_SIZE) * 255).astype(np.uint8)
+        pixels = (test_data[0][index].reshape(IMAGE_SIZE, IMAGE_SIZE) * 255).astype(
+            np.uint8
+        )
         Image.fromarray(pixels).save(SAMPLE)
 
     print(f"train {train_data[0].shape}, test {test_data[0].shape}, sample {SAMPLE}")
@@ -77,7 +82,7 @@ def train(nn_net, train_data, epochs=10, batch_size=256, lr=1e-3):
         order = np.random.permutation(len(x))
         total_loss = 0.0
         for start in range(0, len(x), batch_size):
-            batch = order[start:start + batch_size]
+            batch = order[start : start + batch_size]
             loss = nn_net.loss(x[batch], y[batch])
             nn_net.backward()
             optimizer.step()
@@ -104,10 +109,13 @@ def predict(nn_net, image_url):
         image = Image.open(image_url)
 
     with image:
-        x = np.asarray(
-            image.convert("L").resize((IMAGE_SIZE, IMAGE_SIZE)),
-            dtype=np.float32,
-        ).reshape(1, -1) / 255.0
+        x = (
+            np.asarray(
+                image.convert("L").resize((IMAGE_SIZE, IMAGE_SIZE)),
+                dtype=np.float32,
+            ).reshape(1, -1)
+            / 255.0
+        )
     if x.mean() > 0.5:
         x = 1.0 - x  # 浅色背景的输入转成 MNIST 的白字黑底
 
@@ -118,9 +126,18 @@ def predict(nn_net, image_url):
 
 if __name__ == "__main__":
     np.random.seed(0)
+    model_path = MODEL
     train_data, test_data = data_prepare()
+
+    # 训练模型并保存
     nn_net = build_nn_net([784, 256, 128, 10])
     train(nn_net, train_data)
+    save_nn_net(nn_net, MODEL)
+    print(f"model saved: {model_path}")
+
+    # 加载模型并评估
+    nn_net = load_nn_net(model_path)
     eval(nn_net, test_data)
+
+    # 对样本图片进行预测
     predict(nn_net, str(SAMPLE))
-    print("Prediction completed.")

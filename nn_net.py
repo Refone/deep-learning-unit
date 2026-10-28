@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from layers import Affine, Relu, SoftmaxWithLoss
@@ -29,3 +31,44 @@ class NN:
 
     def predict(self, x):
         return self.forward(x).argmax(axis=1)
+
+
+def save_nn_net(nn_net, path):
+    """保存网络结构（dims）和全部参数到 .npz 文件。"""
+    path = Path(path)
+    if path.suffix != ".npz":
+        path = path.with_name(path.name + ".npz")
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    affines = [layer for layer in nn_net.layers if isinstance(layer, Affine)]
+    dims = [affines[0].W.shape[0]] + [layer.W.shape[1] for layer in affines]
+    params = [p for layer in nn_net.layers for p in layer.params]
+    np.savez_compressed(
+        path,
+        dims=np.asarray(dims),
+        **{f"param_{i}": p for i, p in enumerate(params)},
+    )
+    return path
+
+
+def load_nn_net(path):
+    """从 .npz 文件恢复网络结构和全部参数。"""
+    path = Path(path)
+    if path.suffix != ".npz":
+        path = path.with_name(path.name + ".npz")
+
+    with np.load(path) as data:
+        dims = data["dims"].tolist()
+        keys = sorted(
+            (key for key in data.files if key.startswith("param_")),
+            key=lambda key: int(key.split("_")[1]),
+        )
+        params = [data[key] for key in keys]
+
+    nn_net = NN(dims)
+    index = 0
+    for layer in nn_net.layers:
+        for param in layer.params:
+            param[...] = params[index]
+            index += 1
+    return nn_net
